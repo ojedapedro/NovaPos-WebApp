@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, ShoppingCart, Package, DollarSign, Bell, Truck, Loader2, Users, RefreshCw, Wallet, LogOut, Edit2, Check, X, Menu, HandCoins } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, DollarSign, Bell, Truck, Loader2, Users, RefreshCw, Wallet, LogOut, Edit2, Check, X, Menu, HandCoins, Receipt } from 'lucide-react';
 import { Dashboard } from './pages/Dashboard';
 import { POS } from './pages/POS';
 import { Inventory } from './pages/Inventory';
@@ -9,6 +9,7 @@ import { Suppliers } from './pages/Suppliers';
 import { CashClose } from './pages/CashClose';
 import { Login } from './pages/Login';
 import { Receivables } from './pages/Receivables';
+import { Payables } from './pages/Payables';
 import { ExchangeRate } from './types';
 import { DataService } from './services/dataService';
 import { NotificationProvider, useNotification } from './context/NotificationContext';
@@ -16,7 +17,7 @@ import { useAuth } from './context/AuthContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 const AppContent: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'pos' | 'purchases' | 'inventory' | 'transactions' | 'suppliers' | 'cash_close' | 'receivables'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'pos' | 'purchases' | 'inventory' | 'transactions' | 'suppliers' | 'cash_close' | 'receivables' | 'payables'>('dashboard');
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -92,6 +93,7 @@ const AppContent: React.FC = () => {
       case 'suppliers': return <Suppliers />;
       case 'cash_close': return <CashClose exchangeRate={exchangeRate} />;
       case 'receivables': return <Receivables />;
+      case 'payables': return <Payables />;
       default: return <Dashboard exchangeRate={exchangeRate} />;
     }
   };
@@ -198,6 +200,14 @@ const AppContent: React.FC = () => {
           </button>
 
           <button 
+             onClick={() => navigateTo('payables')}
+             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'payables' ? 'bg-blue-50 text-blue-600 font-medium' : 'text-gray-500 hover:bg-gray-50'}`}
+          >
+            <Receipt size={20} />
+            <span>Por Pagar</span>
+          </button>
+
+          <button 
              onClick={() => navigateTo('cash_close')}
              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'cash_close' ? 'bg-blue-50 text-blue-600 font-medium' : 'text-gray-500 hover:bg-gray-50'}`}
           >
@@ -284,7 +294,8 @@ const AppContent: React.FC = () => {
               activeTab === 'suppliers' ? 'Proveedores' :
               activeTab === 'transactions' ? 'Movimientos de Caja' :
               activeTab === 'cash_close' ? 'Cierre de Caja' : 
-              activeTab === 'receivables' ? 'Cuentas por Cobrar' : activeTab}
+              activeTab === 'receivables' ? 'Cuentas por Cobrar' :
+              activeTab === 'payables' ? 'Cuentas por Pagar' : activeTab}
              </h1>
           </div>
           

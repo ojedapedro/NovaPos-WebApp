@@ -6,7 +6,8 @@ import {
 import {
   Product, Client, SaleHeader, SaleDetail, CashMovement,
   Supplier, PurchaseItem, PurchaseHeader, PurchaseDetail,
-  SaleStatus, CreditPayment, PaymentMethod, TransactionType, TransactionOrigin
+  SaleStatus, CreditPayment, PaymentMethod, TransactionType, TransactionOrigin,
+  SupplierPayment, PurchaseStatus
 } from '../types';
 import {
   INITIAL_PRODUCTS, INITIAL_CLIENTS, INITIAL_SALES, INITIAL_DETAILS,
@@ -26,6 +27,7 @@ const LS = {
   PURCHASES_DETAIL:  'nova_purchases_detail',
   MOVEMENTS:         'nova_movements',
   CREDIT_PAYMENTS:   'nova_credit_payments',
+  SUPPLIER_PAYMENTS: 'nova_supplier_payments',
 };
 
 // ─────────────────────────────────────────
@@ -41,26 +43,28 @@ const FS = {
   PURCHASE_DETAILS:  'purchaseDetails',
   MOVEMENTS:         'movements',
   CREDIT_PAYMENTS:   'creditPayments',
+  SUPPLIER_PAYMENTS: 'supplierPayments',
 };
 
 // ─────────────────────────────────────────
 // In-Memory Cache
 // ─────────────────────────────────────────
 interface AppCache {
-  products:        Product[];
-  clients:         Client[];
-  suppliers:       Supplier[];
-  sales:           SaleHeader[];
-  details:         SaleDetail[];
-  purchases:       PurchaseHeader[];
-  purchaseDetails: PurchaseDetail[];
-  movements:       CashMovement[];
-  creditPayments:  CreditPayment[];
+  products:         Product[];
+  clients:          Client[];
+  suppliers:        Supplier[];
+  sales:            SaleHeader[];
+  details:          SaleDetail[];
+  purchases:        PurchaseHeader[];
+  purchaseDetails:  PurchaseDetail[];
+  movements:        CashMovement[];
+  creditPayments:   CreditPayment[];
+  supplierPayments: SupplierPayment[];
 }
 
 let cache: AppCache = {
   products: [], clients: [], suppliers: [], sales: [],
-  details: [], purchases: [], purchaseDetails: [], movements: [], creditPayments: []
+  details: [], purchases: [], purchaseDetails: [], movements: [], creditPayments: [], supplierPayments: []
 };
 
 // ─────────────────────────────────────────
@@ -111,6 +115,7 @@ const loadFromLocalStorage = () => {
   cache.purchaseDetails = fromLS(LS.PURCHASES_DETAIL, INITIAL_PURCHASE_DETAILS);
   cache.movements       = fromLS(LS.MOVEMENTS,        INITIAL_MOVEMENTS);
   cache.creditPayments  = fromLS(LS.CREDIT_PAYMENTS,  []);
+  cache.supplierPayments= fromLS(LS.SUPPLIER_PAYMENTS,[]);
 };
 
 // Carga inmediata al importar el módulo
@@ -128,7 +133,7 @@ export const DataService = {
   initialize: async () => {
     try {
       const [products, clients, suppliers, sales, details,
-             purchases, purchaseDetails, movements, creditPayments] = await Promise.all([
+             purchases, purchaseDetails, movements, creditPayments, supplierPayments] = await Promise.all([
         fsGetAll<Product>(FS.PRODUCTS),
         fsGetAll<Client>(FS.CLIENTS),
         fsGetAll<Supplier>(FS.SUPPLIERS),
@@ -138,6 +143,7 @@ export const DataService = {
         fsGetAll<PurchaseDetail>(FS.PURCHASE_DETAILS),
         fsGetAll<CashMovement>(FS.MOVEMENTS),
         fsGetAll<CreditPayment>(FS.CREDIT_PAYMENTS),
+        fsGetAll<SupplierPayment>(FS.SUPPLIER_PAYMENTS),
       ]);
 
       if (products.length > 0) setCache('products',        LS.PRODUCTS,         products);
@@ -149,6 +155,7 @@ export const DataService = {
       if (purchaseDetails.length > 0) setCache('purchaseDetails', LS.PURCHASES_DETAIL, purchaseDetails);
       if (movements.length > 0) setCache('movements',      LS.MOVEMENTS,        movements);
       if (creditPayments.length > 0) setCache('creditPayments', LS.CREDIT_PAYMENTS, creditPayments);
+      if (supplierPayments.length > 0) setCache('supplierPayments', LS.SUPPLIER_PAYMENTS, supplierPayments);
 
       console.log('[NovaPOS] Datos sincronizados desde Firestore.');
     } catch (e) {
@@ -166,6 +173,7 @@ export const DataService = {
   getPurchaseDetails: (): PurchaseDetail[] => cache.purchaseDetails,
   getMovements:       (): CashMovement[]   => cache.movements,
   getCreditPayments:  (): CreditPayment[]  => cache.creditPayments,
+  getSupplierPayments:(): SupplierPayment[]=> cache.supplierPayments,
 
   /** Saldo pendiente de una venta a crédito */
   getCreditBalance: (saleId: string): number => {
@@ -175,6 +183,16 @@ export const DataService = {
       .filter(p => p.saleId === saleId)
       .reduce((acc, p) => acc + p.amount, 0);
     return Math.max(0, sale.total - paid);
+  },
+
+  /** Saldo pendiente de una compra a crédito */
+  getPurchaseBalance: (purchaseId: string): number => {
+    const purchase = cache.purchases.find(p => p.id === purchaseId);
+    if (!purchase) return 0;
+    const paid = cache.supplierPayments
+      .filter(p => p.purchaseId === purchaseId)
+      .reduce((acc, p) => acc + p.amount, 0);
+    return Math.max(0, purchase.total - paid);
   },
 
   // ── Escrituras: caché + localStorage + Firestore (async) ──
@@ -244,20 +262,29 @@ export const DataService = {
     fsSet(FS.CLIENTS, client.id, client);
   },
 
-  savePurchase: (items: PurchaseItem[], movement: CashMovement) => {
+  savePurchase: (items: PurchaseItem[], movement?: CashMovement, supplierId?: string) => {
     const purchaseId = `C${crypto.randomUUID().split('-')[0].toUpperCase()}`;
+    const total = items.reduce((acc, item) => acc + (item.quantity * item.newCost), 0);
+    const currency = movement ? movement.currency : 'USD';
+    
+    // Si no hay CashMovement, fue una compra a crédito
+    const status = movement ? PurchaseStatus.PAGADA : PurchaseStatus.PENDIENTE;
+
     const header: PurchaseHeader = {
-      id: purchaseId, date: movement.date,
-      supplierId: movement.supplierId || '',
-      total: movement.amount, currency: movement.currency,
-      reference: movement.reference || '', status: 'Completada'
+      id: purchaseId, 
+      date: movement ? movement.date : new Date().toISOString(),
+      supplierId: supplierId || (movement?.supplierId || ''),
+      total: total, 
+      currency: currency,
+      reference: movement?.reference || '', 
+      status
     };
+    
     const details: PurchaseDetail[] = items.map(item => ({
       purchaseId, productId: item.id, quantity: item.quantity,
       costUnit: item.newCost, subtotal: item.quantity * item.newCost
     }));
 
-    const newMovements       = [...cache.movements, movement];
     const newPurchases       = [...cache.purchases, header];
     const newPurchaseDetails = [...cache.purchaseDetails, ...details];
     const newProducts        = cache.products.map(p => {
@@ -265,16 +292,56 @@ export const DataService = {
       return bought ? { ...p, stock: p.stock + bought.quantity, priceBuy: bought.newCost } : p;
     });
 
-    setCache('movements',       LS.MOVEMENTS,        newMovements);
     setCache('purchases',       LS.PURCHASES_HEADER, newPurchases);
     setCache('purchaseDetails', LS.PURCHASES_DETAIL, newPurchaseDetails);
     setCache('products',        LS.PRODUCTS,         newProducts);
 
-    // Sync to Firestore
     fsSet(FS.PURCHASES, header.id, header);
     details.forEach(d => fsSet(FS.PURCHASE_DETAILS, `${d.purchaseId}_${d.productId}`, d));
-    fsSet(FS.MOVEMENTS, movement.id, movement);
     newProducts.forEach(p => fsSet(FS.PRODUCTS, p.id, p));
+
+    if (movement) {
+        const newMovements = [...cache.movements, movement];
+        setCache('movements', LS.MOVEMENTS, newMovements);
+        fsSet(FS.MOVEMENTS, movement.id, movement);
+    }
+  },
+
+  addSupplierPayment: (payment: SupplierPayment): void => {
+    const newPayments = [...cache.supplierPayments, payment];
+    setCache('supplierPayments', LS.SUPPLIER_PAYMENTS, newPayments);
+
+    // Generar movimiento de caja automático por el egreso
+    const movement: CashMovement = {
+      id: `M${crypto.randomUUID().split('-')[0].toUpperCase()}`,
+      date: payment.date,
+      type: TransactionType.EGRESO,
+      origin: TransactionOrigin.COMPRA,
+      method: payment.method,
+      amount: payment.amount,
+      currency: 'USD',
+      reference: payment.reference || payment.purchaseId,
+      supplierId: cache.purchases.find(p => p.id === payment.purchaseId)?.supplierId
+    };
+    const newMovements = [...cache.movements, movement];
+    setCache('movements', LS.MOVEMENTS, newMovements);
+
+    // Recalcular estado de la compra
+    const purchase = cache.purchases.find(p => p.id === payment.purchaseId);
+    if (purchase) {
+      const totalPaid = newPayments
+        .filter(p => p.purchaseId === payment.purchaseId)
+        .reduce((acc, p) => acc + p.amount, 0);
+      const newStatus = totalPaid >= purchase.total - 0.01 ? PurchaseStatus.PAGADA : PurchaseStatus.PARCIAL;
+      const newPurchases = cache.purchases.map(p =>
+        p.id === payment.purchaseId ? { ...p, status: newStatus } : p
+      );
+      setCache('purchases', LS.PURCHASES_HEADER, newPurchases);
+      fsSet(FS.PURCHASES, purchase.id, { ...purchase, status: newStatus });
+    }
+
+    fsSet(FS.SUPPLIER_PAYMENTS, payment.id, payment);
+    fsSet(FS.MOVEMENTS, movement.id, movement);
   },
 
   addMovement: (movement: CashMovement) => {

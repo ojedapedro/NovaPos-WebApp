@@ -77,6 +77,12 @@ export interface SaleDetail {
   subtotal: number;
 }
 
+export enum PurchaseStatus {
+  PAGADA = 'Pagada',
+  PARCIAL = 'Parcial',
+  PENDIENTE = 'Pendiente'
+}
+
 export interface PurchaseHeader {
   id: string;
   date: string;
@@ -84,7 +90,7 @@ export interface PurchaseHeader {
   total: number;
   currency: string;
   reference: string;
-  status: string; // 'Completada'
+  status: PurchaseStatus;
 }
 
 export interface PurchaseDetail {
@@ -126,6 +132,17 @@ export interface ExchangeRate {
 export interface CreditPayment {
   id: string;
   saleId: string;
+  date: string;
+  amount: number; // En USD
+  method: PaymentMethod;
+  reference?: string;
+  note?: string;
+}
+
+/** Representa un abono parcial o total a una deuda de compra a proveedor */
+export interface SupplierPayment {
+  id: string;
+  purchaseId: string;
   date: string;
   amount: number; // En USD
   method: PaymentMethod;

@@ -199,6 +199,8 @@ export const Purchases: React.FC<PurchasesProps> = ({ exchangeRate }) => {
     showNotification('success', 'Proveedor creado exitosamente');
   };
 
+  const [isCredit, setIsCredit] = useState(false);
+
   const cartTotalUSD = cart.reduce((sum, item) => sum + (item.newCost * item.quantity), 0);
   
   const processPurchase = () => {
@@ -210,30 +212,34 @@ export const Purchases: React.FC<PurchasesProps> = ({ exchangeRate }) => {
 
     const supplierName = suppliers.find(s => s.id === selectedSupplier)?.name || 'Proveedor';
 
-    // FUNC-04 FIX: Determinar la moneda real según el método de pago
-    // Los métodos en Bs registran el egreso en BS, los demás en USD
-    const bsMethods = [PaymentMethod.EFECTIVO_BS, PaymentMethod.PAGO_MOVIL, PaymentMethod.TRANSFERENCIA];
-    const movementCurrency = bsMethods.includes(paymentMethod) ? 'BS' : 'USD';
-    // Si el monto es en BS, convertirlo para el registro; si es USD lo usamos directo
-    const movementAmount = movementCurrency === 'BS'
-      ? cartTotalUSD * exchangeRate.usdToBs
-      : cartTotalUSD;
+    if (isCredit) {
+      // Compra a crédito: Sin movimiento de caja inicial
+      DataService.savePurchase(cart, undefined, selectedSupplier);
+      showNotification('success', "Compra a crédito registrada exitosamente.");
+    } else {
+      // Compra de contado: Genera egreso
+      const bsMethods = [PaymentMethod.EFECTIVO_BS, PaymentMethod.PAGO_MOVIL, PaymentMethod.TRANSFERENCIA];
+      const movementCurrency = bsMethods.includes(paymentMethod) ? 'BS' : 'USD';
+      const movementAmount = movementCurrency === 'BS'
+        ? cartTotalUSD * exchangeRate.usdToBs
+        : cartTotalUSD;
 
-    // DB-03 FIX: crypto.randomUUID() para evitar colisiones de ID
-    const movementId = `M${crypto.randomUUID().split('-')[0].toUpperCase()}`;
-    const newMovement = {
-        id: movementId,
-        date: new Date().toISOString(),
-        type: TransactionType.EGRESO,
-        origin: TransactionOrigin.COMPRA,
-        method: paymentMethod,
-        amount: movementAmount,
-        currency: movementCurrency,
-        reference: `${supplierName} - ${reference}`,
-        supplierId: selectedSupplier
-    };
+      const movementId = `M${crypto.randomUUID().split('-')[0].toUpperCase()}`;
+      const newMovement = {
+          id: movementId,
+          date: new Date().toISOString(),
+          type: TransactionType.EGRESO,
+          origin: TransactionOrigin.COMPRA,
+          method: paymentMethod,
+          amount: movementAmount,
+          currency: movementCurrency,
+          reference: `${supplierName} - ${reference}`,
+          supplierId: selectedSupplier
+      };
 
-    DataService.savePurchase(cart, newMovement);
+      DataService.savePurchase(cart, newMovement, selectedSupplier);
+      showNotification('success', "Compra de contado registrada exitosamente.");
+    }
     
     setCart([]);
     setIsModalOpen(false);
@@ -241,9 +247,19 @@ export const Purchases: React.FC<PurchasesProps> = ({ exchangeRate }) => {
     setPurchases(DataService.getPurchases());
     setPurchaseDetails(DataService.getPurchaseDetails());
     setReference('');
-    showNotification('success', "Compra registrada exitosamente.");
     
     setTimeout(() => searchInputRef.current?.focus(), 100);
+  };
+
+  // Al abrir el modal, pre-seleccionamos el tipo según el proveedor
+  const handleOpenModal = () => {
+    const supplier = suppliers.find(s => s.id === selectedSupplier);
+    if (supplier?.paymentType === 'Crédito') {
+      setIsCredit(true);
+    } else {
+      setIsCredit(false);
+    }
+    setIsModalOpen(true);
   };
 
   return (
@@ -418,7 +434,7 @@ export const Purchases: React.FC<PurchasesProps> = ({ exchangeRate }) => {
                     type="button"
                     className="w-full bg-gray-800 text-white py-3 rounded-xl font-semibold hover:bg-gray-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2"
                     disabled={cart.length === 0}
-                    onClick={() => setIsModalOpen(true)}
+                    onClick={handleOpenModal}
                 >
                     <Save size={18} /> Registrar Compra
                 </button>
@@ -482,13 +498,14 @@ export const Purchases: React.FC<PurchasesProps> = ({ exchangeRate }) => {
                                 <th className="px-6 py-4">Fecha</th>
                                 <th className="px-6 py-4">Proveedor</th>
                                 <th className="px-6 py-4">Referencia</th>
+                                <th className="px-6 py-4">Estado</th>
                                 <th className="px-6 py-4 text-right">Total</th>
                                 <th className="px-6 py-4 text-center">Detalle</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
                             {paginatedPurchases.length === 0 ? (
-                                <tr><td colSpan={5} className="px-6 py-12 text-center text-gray-400">No hay compras en este rango</td></tr>
+                                <tr><td colSpan={6} className="px-6 py-12 text-center text-gray-400">No hay compras en este rango</td></tr>
                             ) : (
                                 paginatedPurchases.map(purch => {
                                   const supplierName = suppliers.find(s => s.id === purch.supplierId)?.name || 'Desconocido';
@@ -503,6 +520,11 @@ export const Purchases: React.FC<PurchasesProps> = ({ exchangeRate }) => {
                                           </td>
                                           <td className="px-6 py-4">
                                               <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">{purch.reference || 'Sin ref'}</span>
+                                          </td>
+                                          <td className="px-6 py-4">
+                                              <span className={`text-xs font-semibold px-2 py-1 rounded-full ${purch.status === 'Pagada' ? 'bg-green-100 text-green-700' : purch.status === 'Parcial' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+                                                {purch.status}
+                                              </span>
                                           </td>
                                           <td className="px-6 py-4 text-right">
                                               <div className="font-bold text-gray-800">
@@ -568,29 +590,51 @@ export const Purchases: React.FC<PurchasesProps> = ({ exchangeRate }) => {
             
             <div className="p-6 space-y-4">
                 <div className="bg-red-50 p-4 rounded-xl border border-red-100 text-center">
-                    <p className="text-sm text-red-600 mb-1">Monto a Retirar de Caja</p>
+                    <p className="text-sm text-red-600 mb-1">Total de la Orden</p>
                     <div className="text-3xl font-bold text-gray-900">${cartTotalUSD.toFixed(2)}</div>
                 </div>
 
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Método de Pago (Egreso)</label>
-                    <select 
-                        className="w-full p-2 border border-gray-300 rounded-lg"
-                        value={paymentMethod}
-                        onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
-                    >
-                        {Object.values(PaymentMethod).map(method => (
-                            <option key={method} value={method}>{method}</option>
-                        ))}
-                    </select>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Tipo de Compra</label>
+                    <div className="flex gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setIsCredit(false)}
+                            className={`flex-1 py-2 rounded-lg border font-medium text-sm transition-colors ${!isCredit ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                        >
+                            Contado
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setIsCredit(true)}
+                            className={`flex-1 py-2 rounded-lg border font-medium text-sm transition-colors ${isCredit ? 'bg-yellow-500 text-white border-yellow-500' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                        >
+                            A Crédito
+                        </button>
+                    </div>
                 </div>
+
+                {!isCredit && (
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Método de Pago (Egreso)</label>
+                        <select 
+                            className="w-full p-2 border border-gray-300 rounded-lg"
+                            value={paymentMethod}
+                            onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
+                        >
+                            {Object.values(PaymentMethod).map(method => (
+                                <option key={method} value={method}>{method}</option>
+                            ))}
+                        </select>
+                    </div>
+                )}
                 
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Referencia / Nota</label>
                     <input 
                         type="text" 
                         className="w-full p-2 border border-gray-300 rounded-lg"
-                        placeholder="Ej: Factura #1234"
+                        placeholder={isCredit ? "Ej: Factura pendiente #1234" : "Ej: Factura #1234"}
                         value={reference}
                         onChange={(e) => setReference(e.target.value)}
                     />
