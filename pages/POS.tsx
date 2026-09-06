@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Search, Plus, Minus, Trash2, ShoppingCart, CreditCard, X, Check, Edit2, RefreshCw, User, ChevronDown, FileText, Calendar, Filter, Eye, Package, UserPlus, Phone, Barcode, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Plus, Minus, Trash2, ShoppingCart, CreditCard, X, Check, Edit2, RefreshCw, User, ChevronDown, FileText, Calendar, Filter, Eye, Package, UserPlus, Phone, Barcode, ChevronLeft, ChevronRight, Camera } from 'lucide-react';
 import { Product, CartItem, Client, SaleType, SaleStatus, ExchangeRate, PaymentMethod, TransactionType, TransactionOrigin, SaleHeader, SaleDetail } from '../types';
 import { DataService } from '../services/dataService';
 import { useNotification } from '../context/NotificationContext';
+import { useBarcodeScanner } from '../hooks/useBarcodeScanner';
+import { CameraBarcodeScanner } from '../components/CameraBarcodeScanner';
 
 interface POSProps {
   exchangeRate: ExchangeRate;
@@ -25,6 +27,23 @@ export const POS: React.FC<POSProps> = ({ exchangeRate, onUpdateExchangeRate }) 
   const [isEditingRate, setIsEditingRate] = useState(false);
   const [tempRate, setTempRate] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false); // Checkout Modal
+  const [isCameraOpen, setIsCameraOpen] = useState(false); // Scanner Modal
+
+  // Global Scanner Hook
+  useBarcodeScanner((code) => {
+    if (activeTab !== 'new' || isModalOpen || isCameraOpen) return;
+    const match = products.find(p => p.id.toLowerCase() === code.toLowerCase());
+    if (match) {
+        if (match.active) {
+            addToCart(match);
+            showNotification('success', `Agregado: ${match.name}`);
+        } else {
+            showNotification('error', 'Producto inactivo');
+        }
+    } else {
+        showNotification('warning', `Código no encontrado: ${code}`);
+    }
+  });
   const [paymentDetails, setPaymentDetails] = useState({
     [PaymentMethod.EFECTIVO_USD]: 0,
     [PaymentMethod.EFECTIVO_BS]: 0,
@@ -324,22 +343,31 @@ export const POS: React.FC<POSProps> = ({ exchangeRate, onUpdateExchangeRate }) 
              <div className="flex flex-1 overflow-hidden">
              {/* POS: Product Catalog */}
              <div className="w-2/3 p-6 overflow-y-auto custom-scrollbar">
-               <div className="mb-6 relative">
-                 <Search className="absolute left-3 top-3 text-gray-400" size={20} />
-                 <input 
-                   ref={searchInputRef}
-                   type="text" 
-                   placeholder="Buscar o escanear código de barras..." 
-                   className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-sm"
-                   value={searchTerm}
-                   onChange={(e) => setSearchTerm(e.target.value)}
-                   onKeyDown={handleKeyDown}
-                   autoFocus
-                 />
-                 <div className="absolute right-3 top-3 text-gray-400 pointer-events-none">
-                     <Barcode size={20} />
+                 <div className="flex gap-2">
+                   <div className="relative flex-1">
+                     <Search className="absolute left-3 top-3 text-gray-400" size={20} />
+                     <input 
+                       ref={searchInputRef}
+                       type="text" 
+                       placeholder="Buscar o escanear código de barras..." 
+                       className="w-full pl-10 pr-10 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-sm"
+                       value={searchTerm}
+                       onChange={(e) => setSearchTerm(e.target.value)}
+                       onKeyDown={handleKeyDown}
+                       autoFocus
+                     />
+                     <div className="absolute right-3 top-3 text-gray-400 pointer-events-none">
+                         <Barcode size={20} />
+                     </div>
+                   </div>
+                   <button
+                     onClick={() => setIsCameraOpen(true)}
+                     className="px-4 py-3 bg-gray-100 text-gray-600 rounded-xl hover:bg-gray-200 hover:text-gray-800 transition-colors flex items-center justify-center border border-gray-200"
+                     title="Escanear con Cámara"
+                   >
+                     <Camera size={20} />
+                   </button>
                  </div>
-               </div>
        
                <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                  {filteredProducts.map(product => (
@@ -871,6 +899,26 @@ export const POS: React.FC<POSProps> = ({ exchangeRate, onUpdateExchangeRate }) 
                 </div>
             </div>
         </div>
+      )}
+
+      {/* Camera Scanner Modal */}
+      {isCameraOpen && (
+        <CameraBarcodeScanner 
+          onScan={(code) => {
+             const match = products.find(p => p.id.toLowerCase() === code.toLowerCase());
+             if (match) {
+                 if (match.active) {
+                     addToCart(match);
+                     showNotification('success', `Agregado: ${match.name}`);
+                 } else {
+                     showNotification('error', 'Producto inactivo');
+                 }
+             } else {
+                 showNotification('warning', `Código no encontrado: ${code}`);
+             }
+          }}
+          onClose={() => setIsCameraOpen(false)}
+        />
       )}
     </div>
   );

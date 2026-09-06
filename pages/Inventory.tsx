@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Search, Plus, Filter, AlertCircle, X, CheckCircle2, Ban, Edit2, ClipboardList, Barcode } from 'lucide-react';
+import { Search, Plus, Filter, AlertCircle, X, CheckCircle2, Ban, Edit2, ClipboardList, Barcode, ClipboardCheck } from 'lucide-react';
 import { Product } from '../types';
 import { DataService } from '../services/dataService';
 import { ProductFormModal } from '../components/ProductFormModal';
 import { KardexModal } from '../components/KardexModal';
+import { InventoryAudit } from '../components/InventoryAudit';
 import { useNotification } from '../context/NotificationContext';
 
 export const Inventory: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<'inventory' | 'audit'>('inventory');
   const [products, setProducts] = useState<Product[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const { showNotification } = useNotification();
@@ -98,19 +100,42 @@ export const Inventory: React.FC = () => {
 
   return (
     <div className="p-6 h-full flex flex-col">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex justify-between items-center mb-4">
         <h2 className="text-2xl font-bold text-gray-800">Inventario</h2>
         <div className="flex gap-2">
-            <button 
-                onClick={handleNewProduct}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 shadow-sm transition-colors font-medium"
-            >
-              <Plus size={18} /> Nuevo Producto
-            </button>
+            {activeTab === 'inventory' && (
+              <button 
+                  onClick={handleNewProduct}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 shadow-sm transition-colors font-medium"
+              >
+                <Plus size={18} /> Nuevo Producto
+              </button>
+            )}
         </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col flex-1 overflow-hidden">
+      {/* Tabs */}
+      <div className="flex gap-2 mb-4">
+        <button
+          onClick={() => setActiveTab('inventory')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors ${activeTab === 'inventory' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100 border border-gray-200 bg-white'}`}
+        >
+          <Barcode size={16} /> Lista de Productos
+        </button>
+        <button
+          onClick={() => setActiveTab('audit')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors ${activeTab === 'audit' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100 border border-gray-200 bg-white'}`}
+        >
+          <ClipboardCheck size={16} /> Auditoria de Inventario
+        </button>
+      </div>
+
+      {activeTab === 'audit' ? (
+        <div className="flex-1 overflow-auto custom-scrollbar bg-gray-50 -mx-6 px-6">
+          <InventoryAudit />
+        </div>
+      ) : (
+
         {/* Controls */}
         <div className="p-4 border-b border-gray-100 space-y-4">
             <div className="flex gap-4">
@@ -242,6 +267,7 @@ export const Inventory: React.FC = () => {
             </table>
         </div>
       </div>
+      )}
 
       <ProductFormModal 
         isOpen={isModalOpen} 
