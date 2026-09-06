@@ -2,11 +2,13 @@ import React, { useState, useMemo, useCallback } from 'react';
 import {
   CreditCard, Search, ChevronLeft, ChevronRight,
   AlertCircle, CheckCircle2, Clock, DollarSign,
-  Plus, X, User, ArrowUpRight, FileText, Phone, Edit2, Check
+  Plus, X, User, ArrowUpRight, FileText, Phone, Edit2, Check, Printer
 } from 'lucide-react';
 import { SaleHeader, SaleStatus, Client, CreditPayment, PaymentMethod } from '../types';
 import { DataService } from '../services/dataService';
 import { useNotification } from '../context/NotificationContext';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 
 const PAGE_SIZE = 10;
 
@@ -229,8 +231,46 @@ export const Receivables: React.FC = () => {
     setRefreshKey(k => k + 1);
   };
 
+  const exportAccountStatement = () => {
+    const doc = new jsPDF();
+    doc.setFontSize(18);
+    doc.text('Estado de Cuenta de Clientes', 14, 22);
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text(`Generado el: ${new Date().toLocaleString('es-VE')}`, 14, 30);
+    
+    // Agrupar deuda por cliente
+    const debtsByClient: Record<string, number> = {};
+    creditSales.filter(s => s.status !== SaleStatus.PAGADA).forEach(s => {
+       debtsByClient[s.clientId] = (debtsByClient[s.clientId] || 0) + DataService.getCreditBalance(s.id);
+    });
+
+    const tableData = Object.entries(debtsByClient)
+      .map(([clientId, debt]) => [
+         clientMap.get(clientId)?.name || 'Desconocido',
+         clientMap.get(clientId)?.phone || 'N/A',
+         `$${debt.toFixed(2)}`
+      ])
+      .sort((a,b) => parseFloat(b[2].replace('$','')) - parseFloat(a[2].replace('$',''))); // Sort by debt desc
+
+    (doc as any).autoTable({
+      startY: 40,
+      head: [['Cliente', 'Teléfono', 'Deuda Total (USD)']],
+      body: tableData,
+      theme: 'grid',
+      headStyles: { fillColor: [59, 130, 246] }
+    });
+
+    const finalY = (doc as any).lastAutoTable.finalY || 40;
+    doc.setFontSize(12);
+    doc.setTextColor(239, 68, 68); // Red
+    doc.text(`Total Cuentas por Cobrar: $${totalDebt.toFixed(2)}`, 14, finalY + 10);
+
+    doc.save(`Estado_Cuenta_Clientes_${new Date().getTime()}.pdf`);
+  };
+
   return (
-    <div className="p-4 md:p-6 space-y-6 animate-fade-in">
+    <div className="p-4 md:p-6 space-y-6 animate-fade-in pb-20">
       {selectedSale && (
         <PaymentModal
           sale={selectedSale}
@@ -242,9 +282,18 @@ export const Receivables: React.FC = () => {
       )}
 
       {/* Header */}
-      <div>
-        <h2 className="text-2xl font-black text-gray-900">Cuentas por Cobrar</h2>
-        <p className="text-gray-500 text-sm mt-1">Seguimiento de ventas a crédito y abonos de clientes</p>
+      <div className="flex justify-between items-end">
+        <div>
+          <h2 className="text-2xl font-black text-gray-900">Cuentas por Cobrar</h2>
+          <p className="text-gray-500 text-sm mt-1">Seguimiento de ventas a crédito y abonos de clientes</p>
+        </div>
+        <button 
+           onClick={exportAccountStatement}
+           className="bg-white border border-gray-200 text-gray-700 px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-gray-50 shadow-sm text-sm font-medium transition-colors"
+        >
+           <Printer size={16} className="text-blue-600"/>
+           Estado de Cuenta (PDF)
+        </button>
       </div>
 
       {/* Summary Cards */}

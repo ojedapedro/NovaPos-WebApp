@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, ShoppingCart, Package, DollarSign, Bell, Truck, Loader2, Users, RefreshCw, Wallet, LogOut, Edit2, Check, X, Menu, HandCoins, Receipt } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, DollarSign, Bell, Truck, Loader2, Users, RefreshCw, Wallet, LogOut, Edit2, Check, X, Menu, HandCoins, Receipt, BarChart2 } from 'lucide-react';
 import { Dashboard } from './pages/Dashboard';
 import { POS } from './pages/POS';
 import { Inventory } from './pages/Inventory';
@@ -10,6 +10,7 @@ import { CashClose } from './pages/CashClose';
 import { Login } from './pages/Login';
 import { Receivables } from './pages/Receivables';
 import { Payables } from './pages/Payables';
+import { Reports } from './pages/Reports';
 import { ExchangeRate } from './types';
 import { DataService } from './services/dataService';
 import { NotificationProvider, useNotification } from './context/NotificationContext';
@@ -17,7 +18,7 @@ import { useAuth } from './context/AuthContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 const AppContent: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'pos' | 'purchases' | 'inventory' | 'transactions' | 'suppliers' | 'cash_close' | 'receivables' | 'payables'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'pos' | 'purchases' | 'inventory' | 'transactions' | 'suppliers' | 'cash_close' | 'receivables' | 'payables' | 'reports'>('dashboard');
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -94,6 +95,7 @@ const AppContent: React.FC = () => {
       case 'cash_close': return <CashClose exchangeRate={exchangeRate} />;
       case 'receivables': return <Receivables />;
       case 'payables': return <Payables />;
+      case 'reports': return <Reports />;
       default: return <Dashboard exchangeRate={exchangeRate} />;
     }
   };
@@ -214,6 +216,14 @@ const AppContent: React.FC = () => {
             <Wallet size={20} />
             <span>Cierre de Caja</span>
           </button>
+
+          <button 
+             onClick={() => navigateTo('reports')}
+             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'reports' ? 'bg-blue-50 text-blue-600 font-medium' : 'text-gray-500 hover:bg-gray-50'}`}
+          >
+            <BarChart2 size={20} />
+            <span>Reportes</span>
+          </button>
         </nav>
 
         <div className="p-4 border-t border-gray-100">
@@ -295,7 +305,8 @@ const AppContent: React.FC = () => {
               activeTab === 'transactions' ? 'Movimientos de Caja' :
               activeTab === 'cash_close' ? 'Cierre de Caja' : 
               activeTab === 'receivables' ? 'Cuentas por Cobrar' :
-              activeTab === 'payables' ? 'Cuentas por Pagar' : activeTab}
+              activeTab === 'payables' ? 'Cuentas por Pagar' :
+              activeTab === 'reports' ? 'Reportes' : activeTab}
              </h1>
           </div>
           

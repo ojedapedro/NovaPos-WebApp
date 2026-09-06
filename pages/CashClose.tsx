@@ -76,41 +76,39 @@ export const CashClose: React.FC<CashCloseProps> = ({ exchangeRate }) => {
     };
   }, [dayMovements, exchangeRate]);
 
-  const handlePrint = () => {
+  const exportPDF = () => {
     window.print();
   };
 
   const formattedDate = new Date(selectedDate + 'T12:00:00').toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
   return (
-    <div className="p-6 h-full flex flex-col animate-fade-in bg-gray-50/50 print:p-0 print:bg-white print:h-auto print:absolute print:top-0 print:left-0 print:w-full print:z-50">
-      
-      {/* Header - Screen Only */}
-      <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4 print:hidden">
+    <div className="p-6 h-full flex flex-col bg-gray-50 print:p-0 print:bg-white print:h-auto">
+      {/* Top Controls - Hidden on print */}
+      <div className="flex justify-between items-center mb-6 print:hidden">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-            <Wallet className="text-blue-600" />
-            Cierre de Caja
-          </h2>
-          <p className="text-gray-500 text-sm">Resumen de movimientos y arqueo diario</p>
+           <h2 className="text-2xl font-bold text-gray-800">Cierre de Caja</h2>
+           <p className="text-gray-500 text-sm mt-1">Arqueo y resumen de movimientos diarios</p>
         </div>
         
-        <div className="flex items-center gap-3 bg-white p-2 rounded-xl shadow-sm border border-gray-200">
-           <div className="flex items-center gap-2 px-3 border-r border-gray-200">
-              <Calendar size={18} className="text-gray-500" />
-              <input 
-                type="date" 
-                className="outline-none text-gray-700 font-medium bg-transparent"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-              />
-           </div>
-           <button 
-             onClick={handlePrint}
-             className="flex items-center gap-2 px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition-colors font-medium text-sm"
-           >
-             <Printer size={16} /> Imprimir
-           </button>
+        <div className="flex items-center gap-4">
+            <div className="relative">
+                <Calendar className="absolute left-3 top-2.5 text-gray-400" size={18} />
+                <input 
+                    type="date" 
+                    className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white shadow-sm"
+                    value={selectedDate}
+                    onChange={(e) => setSelectedDate(e.target.value)}
+                    max={new Date().toISOString().split('T')[0]}
+                />
+            </div>
+            <button 
+                onClick={exportPDF}
+                className="bg-gray-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-gray-900 transition-colors shadow-sm font-medium"
+            >
+                <Printer size={18} />
+                Imprimir / PDF
+            </button>
         </div>
       </div>
 
