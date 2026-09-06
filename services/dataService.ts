@@ -1,99 +1,173 @@
-import { Product, Client, SaleHeader, SaleDetail, CashMovement, Supplier, PurchaseItem, PurchaseHeader, PurchaseDetail, SaleStatus, CreditPayment, PaymentMethod, TransactionType, TransactionOrigin } from '../types';
-import { INITIAL_PRODUCTS, INITIAL_CLIENTS, INITIAL_SALES, INITIAL_DETAILS, INITIAL_MOVEMENTS, INITIAL_SUPPLIERS, INITIAL_PURCHASES, INITIAL_PURCHASE_DETAILS } from './mockData';
-import { ApiService } from './api';
+import { db } from './firebase';
+import {
+  collection, doc, setDoc, deleteDoc, getDocs,
+  writeBatch, query, orderBy, limit, getDoc, updateDoc
+} from 'firebase/firestore';
+import {
+  Product, Client, SaleHeader, SaleDetail, CashMovement,
+  Supplier, PurchaseItem, PurchaseHeader, PurchaseDetail,
+  SaleStatus, CreditPayment, PaymentMethod, TransactionType, TransactionOrigin
+} from '../types';
+import {
+  INITIAL_PRODUCTS, INITIAL_CLIENTS, INITIAL_SALES, INITIAL_DETAILS,
+  INITIAL_MOVEMENTS, INITIAL_SUPPLIERS, INITIAL_PURCHASES, INITIAL_PURCHASE_DETAILS
+} from './mockData';
 
-const STORAGE_KEYS = {
-  PRODUCTS: 'nova_products',
-  CLIENTS: 'nova_clients',
-  SUPPLIERS: 'nova_suppliers',
-  SALES_HEADER: 'nova_sales_header',
-  SALES_DETAIL: 'nova_sales_detail',
-  PURCHASES_HEADER: 'nova_purchases_header',
-  PURCHASES_DETAIL: 'nova_purchases_detail',
-  MOVEMENTS: 'nova_movements',
-  CREDIT_PAYMENTS: 'nova_credit_payments',
-  LAST_SYNC: 'nova_last_sync'
+// ─────────────────────────────────────────
+// LocalStorage Keys (cache layer)
+// ─────────────────────────────────────────
+const LS = {
+  PRODUCTS:          'nova_products',
+  CLIENTS:           'nova_clients',
+  SUPPLIERS:         'nova_suppliers',
+  SALES_HEADER:      'nova_sales_header',
+  SALES_DETAIL:      'nova_sales_detail',
+  PURCHASES_HEADER:  'nova_purchases_header',
+  PURCHASES_DETAIL:  'nova_purchases_detail',
+  MOVEMENTS:         'nova_movements',
+  CREDIT_PAYMENTS:   'nova_credit_payments',
 };
 
-// In-Memory Cache for performance
-// DB-04 FIX: Tipado estricto en lugar de `any`
+// ─────────────────────────────────────────
+// Firestore Collection Names
+// ─────────────────────────────────────────
+const FS = {
+  PRODUCTS:          'products',
+  CLIENTS:           'clients',
+  SUPPLIERS:         'suppliers',
+  SALES:             'sales',
+  SALE_DETAILS:      'salesDetails',
+  PURCHASES:         'purchases',
+  PURCHASE_DETAILS:  'purchaseDetails',
+  MOVEMENTS:         'movements',
+  CREDIT_PAYMENTS:   'creditPayments',
+};
+
+// ─────────────────────────────────────────
+// In-Memory Cache
+// ─────────────────────────────────────────
 interface AppCache {
-  products: Product[];
-  clients: Client[];
-  suppliers: Supplier[];
-  sales: SaleHeader[];
-  details: SaleDetail[];
-  purchases: PurchaseHeader[];
+  products:        Product[];
+  clients:         Client[];
+  suppliers:       Supplier[];
+  sales:           SaleHeader[];
+  details:         SaleDetail[];
+  purchases:       PurchaseHeader[];
   purchaseDetails: PurchaseDetail[];
-  movements: CashMovement[];
-  creditPayments: CreditPayment[];
+  movements:       CashMovement[];
+  creditPayments:  CreditPayment[];
 }
 
 let cache: AppCache = {
-  products: [],
-  clients: [],
-  suppliers: [],
-  sales: [],
-  details: [],
-  purchases: [],
-  purchaseDetails: [],
-  movements: [],
-  creditPayments: []
+  products: [], clients: [], suppliers: [], sales: [],
+  details: [], purchases: [], purchaseDetails: [], movements: [], creditPayments: []
 };
 
-// Helper to save to local storage and update cache
-const updateLocal = <K extends keyof AppCache>(key: string, data: AppCache[K], cacheKey: K) => {
+// ─────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────
+
+/** Lee un array de localStorage; si vacío devuelve el fallback */
+const fromLS = <T>(key: string, fallback: T[]): T[] => {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) return JSON.parse(raw) as T[];
+  } catch { /* ignore */ }
+  return fallback;
+};
+
+/** Actualiza caché + localStorage simultáneamente */
+const setCache = <K extends keyof AppCache>(cacheKey: K, lsKey: string, data: AppCache[K]) => {
   cache[cacheKey] = data;
-  localStorage.setItem(key, JSON.stringify(data));
+  localStorage.setItem(lsKey, JSON.stringify(data));
 };
 
-const loadFromStorage = () => {
-  cache.products = JSON.parse(localStorage.getItem(STORAGE_KEYS.PRODUCTS) || JSON.stringify(INITIAL_PRODUCTS));
-  cache.clients = JSON.parse(localStorage.getItem(STORAGE_KEYS.CLIENTS) || JSON.stringify(INITIAL_CLIENTS));
-  cache.suppliers = JSON.parse(localStorage.getItem(STORAGE_KEYS.SUPPLIERS) || JSON.stringify(INITIAL_SUPPLIERS));
-  cache.sales = JSON.parse(localStorage.getItem(STORAGE_KEYS.SALES_HEADER) || JSON.stringify(INITIAL_SALES));
-  cache.details = JSON.parse(localStorage.getItem(STORAGE_KEYS.SALES_DETAIL) || JSON.stringify(INITIAL_DETAILS));
-  cache.purchases = JSON.parse(localStorage.getItem(STORAGE_KEYS.PURCHASES_HEADER) || JSON.stringify(INITIAL_PURCHASES));
-  cache.purchaseDetails = JSON.parse(localStorage.getItem(STORAGE_KEYS.PURCHASES_DETAIL) || JSON.stringify(INITIAL_PURCHASE_DETAILS));
-  cache.movements = JSON.parse(localStorage.getItem(STORAGE_KEYS.MOVEMENTS) || JSON.stringify(INITIAL_MOVEMENTS));
-  cache.creditPayments = JSON.parse(localStorage.getItem(STORAGE_KEYS.CREDIT_PAYMENTS) || '[]');
+/** Sube un documento a Firestore sin bloquear la UI (fire & forget) */
+const fsSet = (col: string, id: string, data: object) => {
+  setDoc(doc(db, col, id), data).catch(e => console.warn(`[Firestore] Error escribiendo ${col}/${id}:`, e));
 };
 
-// Initial load
-loadFromStorage();
+/** Elimina un documento de Firestore sin bloquear la UI */
+const fsDel = (col: string, id: string) => {
+  deleteDoc(doc(db, col, id)).catch(e => console.warn(`[Firestore] Error eliminando ${col}/${id}:`, e));
+};
 
+/** Carga una colección completa de Firestore como array tipado */
+const fsGetAll = async <T>(col: string): Promise<T[]> => {
+  const snap = await getDocs(collection(db, col));
+  return snap.docs.map(d => d.data() as T);
+};
+
+// ─────────────────────────────────────────
+// Bootstrap: carga inicial desde localStorage
+// ─────────────────────────────────────────
+const loadFromLocalStorage = () => {
+  cache.products        = fromLS(LS.PRODUCTS,         INITIAL_PRODUCTS);
+  cache.clients         = fromLS(LS.CLIENTS,          INITIAL_CLIENTS);
+  cache.suppliers       = fromLS(LS.SUPPLIERS,        INITIAL_SUPPLIERS);
+  cache.sales           = fromLS(LS.SALES_HEADER,     INITIAL_SALES);
+  cache.details         = fromLS(LS.SALES_DETAIL,     INITIAL_DETAILS);
+  cache.purchases       = fromLS(LS.PURCHASES_HEADER, INITIAL_PURCHASES);
+  cache.purchaseDetails = fromLS(LS.PURCHASES_DETAIL, INITIAL_PURCHASE_DETAILS);
+  cache.movements       = fromLS(LS.MOVEMENTS,        INITIAL_MOVEMENTS);
+  cache.creditPayments  = fromLS(LS.CREDIT_PAYMENTS,  []);
+};
+
+// Carga inmediata al importar el módulo
+loadFromLocalStorage();
+
+// ─────────────────────────────────────────
+// DataService
+// ─────────────────────────────────────────
 export const DataService = {
+
+  /**
+   * Inicializa la app: carga desde Firestore y actualiza el caché local.
+   * Si falla (sin internet), la app sigue funcionando desde localStorage.
+   */
   initialize: async () => {
     try {
-      const cloudData = await ApiService.fetchDatabase();
-      if (cloudData) {
-        updateLocal(STORAGE_KEYS.PRODUCTS, cloudData.products, 'products');
-        updateLocal(STORAGE_KEYS.CLIENTS, cloudData.clients, 'clients');
-        updateLocal(STORAGE_KEYS.SUPPLIERS, cloudData.suppliers, 'suppliers');
-        updateLocal(STORAGE_KEYS.SALES_HEADER, cloudData.sales, 'sales');
-        updateLocal(STORAGE_KEYS.SALES_DETAIL, cloudData.details, 'details');
-        updateLocal(STORAGE_KEYS.PURCHASES_HEADER, cloudData.purchases, 'purchases');
-        updateLocal(STORAGE_KEYS.PURCHASES_DETAIL, cloudData.purchaseDetails, 'purchaseDetails');
-        updateLocal(STORAGE_KEYS.MOVEMENTS, cloudData.movements, 'movements');
-        console.log('Data synced with Google Sheets');
-      }
+      const [products, clients, suppliers, sales, details,
+             purchases, purchaseDetails, movements, creditPayments] = await Promise.all([
+        fsGetAll<Product>(FS.PRODUCTS),
+        fsGetAll<Client>(FS.CLIENTS),
+        fsGetAll<Supplier>(FS.SUPPLIERS),
+        fsGetAll<SaleHeader>(FS.SALES),
+        fsGetAll<SaleDetail>(FS.SALE_DETAILS),
+        fsGetAll<PurchaseHeader>(FS.PURCHASES),
+        fsGetAll<PurchaseDetail>(FS.PURCHASE_DETAILS),
+        fsGetAll<CashMovement>(FS.MOVEMENTS),
+        fsGetAll<CreditPayment>(FS.CREDIT_PAYMENTS),
+      ]);
+
+      if (products.length > 0) setCache('products',        LS.PRODUCTS,         products);
+      if (clients.length > 0)  setCache('clients',         LS.CLIENTS,          clients);
+      if (suppliers.length > 0) setCache('suppliers',      LS.SUPPLIERS,        suppliers);
+      if (sales.length > 0)    setCache('sales',           LS.SALES_HEADER,     sales);
+      if (details.length > 0)  setCache('details',         LS.SALES_DETAIL,     details);
+      if (purchases.length > 0) setCache('purchases',      LS.PURCHASES_HEADER, purchases);
+      if (purchaseDetails.length > 0) setCache('purchaseDetails', LS.PURCHASES_DETAIL, purchaseDetails);
+      if (movements.length > 0) setCache('movements',      LS.MOVEMENTS,        movements);
+      if (creditPayments.length > 0) setCache('creditPayments', LS.CREDIT_PAYMENTS, creditPayments);
+
+      console.log('[NovaPOS] Datos sincronizados desde Firestore.');
     } catch (e) {
-      console.warn('Offline mode or API error. Using local data.', e);
+      console.warn('[NovaPOS] Sin conexión — usando datos locales.', e);
     }
   },
 
-  // Getters return from memory cache (Sync, fast)
-  getProducts: (): Product[] => cache.products,
-  getClients: (): Client[] => cache.clients,
-  getSuppliers: (): Supplier[] => cache.suppliers,
-  getSales: (): SaleHeader[] => cache.sales,
-  getSaleDetails: (): SaleDetail[] => cache.details,
-  getPurchases: (): PurchaseHeader[] => cache.purchases,
+  // ── Getters (leen del caché en memoria, síncronos, ultra-rápidos) ──
+  getProducts:        (): Product[]        => cache.products,
+  getClients:         (): Client[]         => cache.clients,
+  getSuppliers:       (): Supplier[]       => cache.suppliers,
+  getSales:           (): SaleHeader[]     => cache.sales,
+  getSaleDetails:     (): SaleDetail[]     => cache.details,
+  getPurchases:       (): PurchaseHeader[] => cache.purchases,
   getPurchaseDetails: (): PurchaseDetail[] => cache.purchaseDetails,
-  getMovements: (): CashMovement[] => cache.movements,
-  getCreditPayments: (): CreditPayment[] => cache.creditPayments,
+  getMovements:       (): CashMovement[]   => cache.movements,
+  getCreditPayments:  (): CreditPayment[]  => cache.creditPayments,
 
-  /** Calcula el saldo pendiente de una venta a crédito */
+  /** Saldo pendiente de una venta a crédito */
   getCreditBalance: (saleId: string): number => {
     const sale = cache.sales.find(s => s.id === saleId);
     if (!sale) return 0;
@@ -103,31 +177,34 @@ export const DataService = {
     return Math.max(0, sale.total - paid);
   },
 
-  // Setters update Cache -> LocalStorage -> Async API Call
+  // ── Escrituras: caché + localStorage + Firestore (async) ──
+
   saveSale: (header: SaleHeader, details: SaleDetail[], movements: CashMovement[]) => {
-    const newSales = [...cache.sales, header];
-    const newDetails = [...cache.details, ...details];
+    const newSales     = [...cache.sales, header];
+    const newDetails   = [...cache.details, ...details];
     const newMovements = [...cache.movements, ...movements];
-    
-    const newProducts = cache.products.map((p: Product) => {
-      const soldItem = details.find(d => d.productId === p.id);
-      return soldItem ? { ...p, stock: p.stock - soldItem.quantity } : p;
+    const newProducts  = cache.products.map(p => {
+      const sold = details.find(d => d.productId === p.id);
+      return sold ? { ...p, stock: p.stock - sold.quantity } : p;
     });
 
-    updateLocal(STORAGE_KEYS.SALES_HEADER, newSales, 'sales');
-    updateLocal(STORAGE_KEYS.SALES_DETAIL, newDetails, 'details');
-    updateLocal(STORAGE_KEYS.MOVEMENTS, newMovements, 'movements');
-    updateLocal(STORAGE_KEYS.PRODUCTS, newProducts, 'products');
+    setCache('sales',     LS.SALES_HEADER, newSales);
+    setCache('details',   LS.SALES_DETAIL, newDetails);
+    setCache('movements', LS.MOVEMENTS,    newMovements);
+    setCache('products',  LS.PRODUCTS,     newProducts);
 
-    ApiService.sendAction('SAVE_SALE', { header, details, movements });
+    // Sync to Firestore
+    fsSet(FS.SALES, header.id, header);
+    details.forEach(d => fsSet(FS.SALE_DETAILS, `${d.saleId}_${d.productId}`, d));
+    movements.forEach(m => fsSet(FS.MOVEMENTS, m.id, m));
+    newProducts.forEach(p => fsSet(FS.PRODUCTS, p.id, p));
   },
 
-  /** Registra un abono a una venta a crédito y actualiza su estado */
   addCreditPayment: (payment: CreditPayment): void => {
     const newPayments = [...cache.creditPayments, payment];
-    updateLocal(STORAGE_KEYS.CREDIT_PAYMENTS, newPayments, 'creditPayments');
+    setCache('creditPayments', LS.CREDIT_PAYMENTS, newPayments);
 
-    // Generar movimiento de caja por el abono
+    // Movimiento de caja automático
     const movement: CashMovement = {
       id: `M${crypto.randomUUID().split('-')[0].toUpperCase()}`,
       date: payment.date,
@@ -139,7 +216,7 @@ export const DataService = {
       reference: payment.reference || payment.saleId,
     };
     const newMovements = [...cache.movements, movement];
-    updateLocal(STORAGE_KEYS.MOVEMENTS, newMovements, 'movements');
+    setCache('movements', LS.MOVEMENTS, newMovements);
 
     // Recalcular estado de la venta
     const sale = cache.sales.find(s => s.id === payment.saleId);
@@ -151,108 +228,86 @@ export const DataService = {
       const newSales = cache.sales.map(s =>
         s.id === payment.saleId ? { ...s, status: newStatus } : s
       );
-      updateLocal(STORAGE_KEYS.SALES_HEADER, newSales, 'sales');
+      setCache('sales', LS.SALES_HEADER, newSales);
+      fsSet(FS.SALES, sale.id, { ...sale, status: newStatus });
     }
 
-    ApiService.sendAction('SAVE_CREDIT_PAYMENT', { payment, movement });
+    fsSet(FS.CREDIT_PAYMENTS, payment.id, payment);
+    fsSet(FS.MOVEMENTS, movement.id, movement);
   },
 
-  /** Actualiza o crea un cliente */
   updateClient: (client: Client): void => {
     const index = cache.clients.findIndex(c => c.id === client.id);
     const newClients = [...cache.clients];
-    if (index >= 0) {
-      newClients[index] = client;
-    } else {
-      newClients.push(client);
-    }
-    updateLocal(STORAGE_KEYS.CLIENTS, newClients, 'clients');
-    ApiService.sendAction('SAVE_CLIENT', client);
+    if (index >= 0) newClients[index] = client; else newClients.push(client);
+    setCache('clients', LS.CLIENTS, newClients);
+    fsSet(FS.CLIENTS, client.id, client);
   },
 
   savePurchase: (items: PurchaseItem[], movement: CashMovement) => {
     const purchaseId = `C${crypto.randomUUID().split('-')[0].toUpperCase()}`;
     const header: PurchaseHeader = {
-        id: purchaseId,
-        date: movement.date,
-        supplierId: movement.supplierId || '',
-        total: movement.amount,
-        currency: movement.currency,
-        reference: movement.reference || '',
-        status: 'Completada'
+      id: purchaseId, date: movement.date,
+      supplierId: movement.supplierId || '',
+      total: movement.amount, currency: movement.currency,
+      reference: movement.reference || '', status: 'Completada'
     };
-
     const details: PurchaseDetail[] = items.map(item => ({
-        purchaseId,
-        productId: item.id,
-        quantity: item.quantity,
-        costUnit: item.newCost,
-        subtotal: item.quantity * item.newCost
+      purchaseId, productId: item.id, quantity: item.quantity,
+      costUnit: item.newCost, subtotal: item.quantity * item.newCost
     }));
 
-    const newMovements = [...cache.movements, movement];
-    const newPurchases = [...cache.purchases, header];
+    const newMovements       = [...cache.movements, movement];
+    const newPurchases       = [...cache.purchases, header];
     const newPurchaseDetails = [...cache.purchaseDetails, ...details];
-    
-    const newProducts = cache.products.map((p: Product) => {
-      const purchasedItem = items.find(item => item.id === p.id);
-      if (purchasedItem) {
-        return { 
-            ...p, 
-            stock: p.stock + purchasedItem.quantity,
-            priceBuy: purchasedItem.newCost 
-        };
-      }
-      return p;
+    const newProducts        = cache.products.map(p => {
+      const bought = items.find(i => i.id === p.id);
+      return bought ? { ...p, stock: p.stock + bought.quantity, priceBuy: bought.newCost } : p;
     });
 
-    updateLocal(STORAGE_KEYS.MOVEMENTS, newMovements, 'movements');
-    updateLocal(STORAGE_KEYS.PURCHASES_HEADER, newPurchases, 'purchases');
-    updateLocal(STORAGE_KEYS.PURCHASES_DETAIL, newPurchaseDetails, 'purchaseDetails');
-    updateLocal(STORAGE_KEYS.PRODUCTS, newProducts, 'products');
+    setCache('movements',       LS.MOVEMENTS,        newMovements);
+    setCache('purchases',       LS.PURCHASES_HEADER, newPurchases);
+    setCache('purchaseDetails', LS.PURCHASES_DETAIL, newPurchaseDetails);
+    setCache('products',        LS.PRODUCTS,         newProducts);
 
-    ApiService.sendAction('SAVE_PURCHASE', { items, movement, header, details });
+    // Sync to Firestore
+    fsSet(FS.PURCHASES, header.id, header);
+    details.forEach(d => fsSet(FS.PURCHASE_DETAILS, `${d.purchaseId}_${d.productId}`, d));
+    fsSet(FS.MOVEMENTS, movement.id, movement);
+    newProducts.forEach(p => fsSet(FS.PRODUCTS, p.id, p));
   },
 
   addMovement: (movement: CashMovement) => {
     const newMovements = [...cache.movements, movement];
-    updateLocal(STORAGE_KEYS.MOVEMENTS, newMovements, 'movements');
-    ApiService.sendAction('SAVE_MOVEMENT', movement);
+    setCache('movements', LS.MOVEMENTS, newMovements);
+    fsSet(FS.MOVEMENTS, movement.id, movement);
   },
-  
+
   updateProduct: (product: Product) => {
-    const index = cache.products.findIndex((p: Product) => p.id === product.id);
+    const index = cache.products.findIndex(p => p.id === product.id);
     const newProducts = [...cache.products];
-    if (index >= 0) {
-      newProducts[index] = product;
-    } else {
-      newProducts.push(product);
-    }
-    updateLocal(STORAGE_KEYS.PRODUCTS, newProducts, 'products');
-    ApiService.sendAction('SYNC_INVENTORY', product);
+    if (index >= 0) newProducts[index] = product; else newProducts.push(product);
+    setCache('products', LS.PRODUCTS, newProducts);
+    fsSet(FS.PRODUCTS, product.id, product);
   },
 
   saveSupplier: (supplier: Supplier) => {
-    const index = cache.suppliers.findIndex((s: Supplier) => s.id === supplier.id);
+    const index = cache.suppliers.findIndex(s => s.id === supplier.id);
     const newSuppliers = [...cache.suppliers];
-    if (index >= 0) {
-        newSuppliers[index] = supplier;
-    } else {
-        newSuppliers.push(supplier);
-    }
-    updateLocal(STORAGE_KEYS.SUPPLIERS, newSuppliers, 'suppliers');
-    ApiService.sendAction('SAVE_SUPPLIER', supplier);
+    if (index >= 0) newSuppliers[index] = supplier; else newSuppliers.push(supplier);
+    setCache('suppliers', LS.SUPPLIERS, newSuppliers);
+    fsSet(FS.SUPPLIERS, supplier.id, supplier);
   },
 
   deleteSupplier: (supplierId: string) => {
-    const newSuppliers = cache.suppliers.filter((s: Supplier) => s.id !== supplierId);
-    updateLocal(STORAGE_KEYS.SUPPLIERS, newSuppliers, 'suppliers');
-    ApiService.sendAction('DELETE_SUPPLIER', { id: supplierId });
+    const newSuppliers = cache.suppliers.filter(s => s.id !== supplierId);
+    setCache('suppliers', LS.SUPPLIERS, newSuppliers);
+    fsDel(FS.SUPPLIERS, supplierId);
   },
 
   saveClient: (client: Client) => {
     const newClients = [...cache.clients, client];
-    updateLocal(STORAGE_KEYS.CLIENTS, newClients, 'clients');
-    ApiService.sendAction('SAVE_CLIENT', client);
-  }
+    setCache('clients', LS.CLIENTS, newClients);
+    fsSet(FS.CLIENTS, client.id, client);
+  },
 };
