@@ -1,43 +1,27 @@
 import { db } from './firebase';
-import { collection, doc, writeBatch, getDocs } from 'firebase/firestore';
-
-const STORAGE_KEYS = {
-    PRODUCTS:         'nova_products',
-    CLIENTS:          'nova_clients',
-    SUPPLIERS:        'nova_suppliers',
-    SALES_HEADER:     'nova_sales_header',
-    SALES_DETAIL:     'nova_sales_detail',
-    PURCHASES_HEADER: 'nova_purchases_header',
-    PURCHASES_DETAIL: 'nova_purchases_detail',
-    MOVEMENTS:        'nova_movements',
-    CREDIT_PAYMENTS:  'nova_credit_payments',
-};
-
-const getLocal = (key: string) => {
-    const data = localStorage.getItem(key);
-    return data ? JSON.parse(data) : [];
-};
+import { collection, doc, writeBatch } from 'firebase/firestore';
+import { DataService } from './dataService';
 
 export const migrateDataToFirebase = async () => {
     console.log("Iniciando migración a Firebase...");
     try {
         const collections = [
-            { key: STORAGE_KEYS.PRODUCTS,         name: 'products' },
-            { key: STORAGE_KEYS.CLIENTS,           name: 'clients' },
-            { key: STORAGE_KEYS.SUPPLIERS,         name: 'suppliers' },
-            { key: STORAGE_KEYS.SALES_HEADER,      name: 'sales' },
-            { key: STORAGE_KEYS.SALES_DETAIL,      name: 'salesDetails' },
-            { key: STORAGE_KEYS.PURCHASES_HEADER,  name: 'purchases' },
-            { key: STORAGE_KEYS.PURCHASES_DETAIL,  name: 'purchaseDetails' },
-            { key: STORAGE_KEYS.MOVEMENTS,         name: 'movements' },
-            { key: STORAGE_KEYS.CREDIT_PAYMENTS,   name: 'creditPayments' },
+            { name: 'products',        data: DataService.getProducts() },
+            { name: 'clients',         data: DataService.getClients() },
+            { name: 'suppliers',       data: DataService.getSuppliers() },
+            { name: 'sales',           data: DataService.getSales() },
+            { name: 'salesDetails',    data: DataService.getSaleDetails() },
+            { name: 'purchases',       data: DataService.getPurchases() },
+            { name: 'purchaseDetails', data: DataService.getPurchaseDetails() },
+            { name: 'movements',       data: DataService.getMovements() },
+            { name: 'creditPayments',  data: DataService.getCreditPayments() },
         ];
 
         let totalRecords = 0;
 
         for (const col of collections) {
-            const data = getLocal(col.key);
-            if (data.length === 0) {
+            const data = col.data;
+            if (!data || data.length === 0) {
                 console.log(`[${col.name}] Sin datos locales. Omitiendo.`);
                 continue;
             }
