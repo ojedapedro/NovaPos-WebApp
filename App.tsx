@@ -114,8 +114,15 @@ const AppContent: React.FC = () => {
     setIsMobileMenuOpen(false);
   };
 
+  const IS_DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
+
   return (
-    <div className="flex h-screen bg-gray-50 overflow-hidden">
+    <div className="flex h-screen bg-gray-50 overflow-hidden relative">
+      {IS_DEMO_MODE && (
+        <div className="absolute top-0 w-full bg-red-600 text-white text-center py-1 text-xs md:text-sm font-bold z-[100] uppercase tracking-wide">
+          Modo Demo Activo - Los cambios se guardan solo en este dispositivo (Sin Nube)
+        </div>
+      )}
       {/* Mobile overlay */}
       {isMobileMenuOpen && (
         <div 

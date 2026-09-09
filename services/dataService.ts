@@ -86,18 +86,23 @@ const setCache = <K extends keyof AppCache>(cacheKey: K, lsKey: string, data: Ap
   localStorage.setItem(lsKey, JSON.stringify(data));
 };
 
+const IS_DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
+
 /** Sube un documento a Firestore sin bloquear la UI (fire & forget) */
 const fsSet = (col: string, id: string, data: object) => {
+  if (IS_DEMO_MODE) return;
   setDoc(doc(db, col, id), data).catch(e => console.warn(`[Firestore] Error escribiendo ${col}/${id}:`, e));
 };
 
 /** Elimina un documento de Firestore sin bloquear la UI */
 const fsDel = (col: string, id: string) => {
+  if (IS_DEMO_MODE) return;
   deleteDoc(doc(db, col, id)).catch(e => console.warn(`[Firestore] Error eliminando ${col}/${id}:`, e));
 };
 
 /** Carga una colección completa de Firestore como array tipado */
 const fsGetAll = async <T>(col: string): Promise<T[]> => {
+  if (IS_DEMO_MODE) return [];
   const snap = await getDocs(collection(db, col));
   return snap.docs.map(d => d.data() as T);
 };

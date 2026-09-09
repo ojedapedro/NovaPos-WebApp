@@ -22,6 +22,7 @@ const AuthContext = createContext<AuthContextType>({
 
 const VALID_PIN = import.meta.env.VITE_APP_PIN || '1234';
 const VALID_USER = import.meta.env.VITE_APP_USER || 'admin';
+const IS_DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -30,6 +31,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Escuchar cambios de estado en Firebase Auth
   useEffect(() => {
+    if (IS_DEMO_MODE) {
+      const demoAuth = localStorage.getItem('nova_demo_auth');
+      if (demoAuth === 'true') {
+        setIsAuthenticated(true);
+        setCurrentUser(VALID_USER);
+      } else {
+        setIsAuthenticated(false);
+        setCurrentUser('');
+      }
+      setIsInitializing(false);
+      return;
+    }
+
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
         setIsAuthenticated(true);
@@ -45,6 +59,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (user: string, pin: string): Promise<boolean> => {
     if (user.toLowerCase() === VALID_USER.toLowerCase() && pin === VALID_PIN) {
+      if (IS_DEMO_MODE) {
+        localStorage.setItem('nova_demo_auth', 'true');
+        setIsAuthenticated(true);
+        setCurrentUser(VALID_USER);
+        return true;
+      }
+
       const email = `admin_${VALID_USER.toLowerCase()}@novapos.com`;
       const password = `NovaPOS_${pin}`;
       
@@ -72,6 +93,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
+    if (IS_DEMO_MODE) {
+      localStorage.removeItem('nova_demo_auth');
+      setIsAuthenticated(false);
+      setCurrentUser('');
+      return;
+    }
+
     try {
       await signOut(auth);
     } catch (error) {
